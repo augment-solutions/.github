@@ -1,0 +1,130 @@
+name: Augment PR Review with Test Coverage (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      # External repository configuration
+      external_repo:
+        description: 'External repository to checkout for reference (e.g., box/box-node-sdk)'
+        required: false
+        type: string
+        default: ''
+      external_repo_path:
+        description: 'Path to checkout external repo'
+        required: false
+        type: string
+        default: 'external-repos/reference'
+
+      # Node.js configuration
+      node_version:
+        description: 'Node.js version to use'
+        required: false
+        type: string
+        default: '22'
+      package_manager:
+        description: 'Package manager cache (npm, yarn, pnpm)'
+        required: false
+        type: string
+        default: 'npm'
+
+      # Build and test configuration
+      install_command:
+        description: 'Command to install dependencies'
+        required: false
+        type: string
+        default: 'npm ci'
+      test_command:
+        description: 'Command to run tests with coverage'
+        required: false
+        type: string
+        default: 'npm test -- --coverage --coverageReporters=json-summary --coverageReporters=text'
+      continue_on_test_failure:
+        description: 'Continue workflow even if tests fail'
+        required: false
+        type: boolean
+        default: true
+
+      # Review configuration
+      custom_guidelines:
+        description: 'Project-specific review guidelines (appended to base guidelines)'
+        required: false
+        type: string
+        default: ''
+
+    secrets:
+      augment_session_auth:
+        required: true
+      github_token:
+        required: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout external reference repository
+        if: inputs.external_repo != ''
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.external_repo }}
+          path: ${{ inputs.external_repo_path }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: ${{ inputs.package_manager }}
+
+      - name: Install dependencies
+        run: ${{ inputs.install_command }}
+
+      - name: Run tests with coverage
+        run: ${{ inputs.test_command }}
+        continue-on-error: ${{ inputs.continue_on_test_failure }}
+
+      - name: Generate PR Review with Test Coverage Analysis
+        uses: augmentcode/review-pr@v0
+        with:
+          augment_session_auth: ${{ secrets.augment_session_auth }}
+          github_token: ${{ secrets.github_token || github.token }}
+          pull_number: ${{ github.event.pull_request.number }}
+          repo_name: ${{ github.repository }}
+          custom_guidelines: |
+            ## Base Code Review Guidelines
+            - Focus on objective issues like bugs and security vulnerabilities
+            - Avoid subjective issues like style/readability
+            - Skip issues already caught by existing tools (compiler errors, linters)
+            - Be cautious with config files where context may be limited
+            - Prefer zero comments over low-confidence comments
+
+            ## Test Coverage Analysis
+
+            ### Test Design Principles
+            - Focus on **behavior over implementation** - test public interfaces
+            - Ensure **determinism & speed** - no network calls or external services
+            - Use **Arrange-Act-Assert (AAA)** pattern
+            - Prefer **meaningful coverage**, not just high numbers
+            - Keep tests **maintainable**
+
+            ### Coverage Review Tasks
+            1. **Analyze test coverage** - Check coverage metrics
+            2. **Identify untested code paths** - Flag new code without tests
+            3. **Check edge cases** - Null/undefined, empty collections, boundaries
+            4. **Verify error paths** - Exception handling, invalid inputs
+            5. **Review test quality** - Deterministic, proper mocking, descriptive names
+
+            ### Coverage Thresholds
+            - New features: aim for >80% coverage
+            - Critical paths: must have 100% coverage
+            - Flag new code with <50% coverage as high priority
+
+            ${{ inputs.custom_guidelines }}
+
