@@ -37,7 +37,7 @@ on:
     secrets:
       augment_session_auth:
         required: true
-      github_token:
+      gh_token:
         required: false
 
 jobs:
@@ -70,7 +70,7 @@ jobs:
         uses: augmentcode/review-pr@v0
         with:
           augment_session_auth: ${{ secrets.augment_session_auth }}
-          github_token: ${{ secrets.github_token || github.token }}
+          github_token: ${{ secrets.gh_token || github.token }}
           pull_number: ${{ github.event.pull_request.number }}
           repo_name: ${{ github.repository }}
           custom_guidelines: |
