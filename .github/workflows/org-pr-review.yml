@@ -27,23 +27,6 @@ on:
         type: string
         default: 'npm'
 
-      # Build and test configuration
-      install_command:
-        description: 'Command to install dependencies'
-        required: false
-        type: string
-        default: 'npm ci'
-      test_command:
-        description: 'Command to run tests with coverage'
-        required: false
-        type: string
-        default: 'npm test -- --coverage --coverageReporters=json-summary --coverageReporters=text'
-      continue_on_test_failure:
-        description: 'Continue workflow even if tests fail'
-        required: false
-        type: boolean
-        default: true
-
       # Review configuration
       custom_guidelines:
         description: 'Project-specific review guidelines (appended to base guidelines)'
@@ -83,13 +66,6 @@ jobs:
           node-version: ${{ inputs.node_version }}
           cache: ${{ inputs.package_manager }}
 
-      - name: Install dependencies
-        run: ${{ inputs.install_command }}
-
-      - name: Run tests with coverage
-        run: ${{ inputs.test_command }}
-        continue-on-error: ${{ inputs.continue_on_test_failure }}
-
       - name: Generate PR Review with Test Coverage Analysis
         uses: augmentcode/review-pr@v0
         with:
@@ -104,27 +80,6 @@ jobs:
             - Skip issues already caught by existing tools (compiler errors, linters)
             - Be cautious with config files where context may be limited
             - Prefer zero comments over low-confidence comments
-
-            ## Test Coverage Analysis
-
-            ### Test Design Principles
-            - Focus on **behavior over implementation** - test public interfaces
-            - Ensure **determinism & speed** - no network calls or external services
-            - Use **Arrange-Act-Assert (AAA)** pattern
-            - Prefer **meaningful coverage**, not just high numbers
-            - Keep tests **maintainable**
-
-            ### Coverage Review Tasks
-            1. **Analyze test coverage** - Check coverage metrics
-            2. **Identify untested code paths** - Flag new code without tests
-            3. **Check edge cases** - Null/undefined, empty collections, boundaries
-            4. **Verify error paths** - Exception handling, invalid inputs
-            5. **Review test quality** - Deterministic, proper mocking, descriptive names
-
-            ### Coverage Thresholds
-            - New features: aim for >80% coverage
-            - Critical paths: must have 100% coverage
-            - Flag new code with <50% coverage as high priority
 
             ${{ inputs.custom_guidelines }}
 
