@@ -1,0 +1,175 @@
+name: Augment Build Triage (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      workflow_run_id:
+        description: 'Failed workflow run ID'
+        required: true
+        type: string
+      source_branch:
+        description: 'Branch where failure occurred'
+        required: true
+        type: string
+      failed_services:
+        description: 'Comma-separated list of failed services (optional)'
+        required: false
+        type: string
+        default: ''
+      branch_prefix:
+        description: 'Prefix for fix branch name'
+        required: false
+        type: string
+        default: 'auggie/fix'
+      custom_instructions:
+        description: 'Additional instructions for the agent (optional)'
+        required: false
+        type: string
+        default: ''
+      model:
+        description: 'Model to use for the agent (optional)'
+        required: false
+        type: string
+        default: ''
+
+    secrets:
+      augment_session_auth:
+        required: true
+      gh_token:
+        required: true
+
+    outputs:
+      fix_branch:
+        description: 'Name of the created fix branch'
+        value: ${{ jobs.triage.outputs.fix_branch }}
+      failure_type:
+        description: 'Detected failure type'
+        value: ${{ jobs.triage.outputs.failure_type }}
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: read
+
+    outputs:
+      fix_branch: ${{ steps.create-branch.outputs.branch_name }}
+      failure_type: ${{ steps.analyze-logs.outputs.failure_type }}
+
+    steps:
+      - name: Checkout source branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_branch }}
+          fetch-depth: 0
+          token: ${{ secrets.gh_token }}
+
+      - name: Setup GitHub CLI
+        run: |
+          gh --version
+
+      - name: Download workflow logs
+        env:
+          GH_TOKEN: ${{ secrets.gh_token }}
+        run: |
+          mkdir -p /tmp/ci-logs
+          gh run view ${{ inputs.workflow_run_id }} --log > /tmp/ci-logs/full-logs.txt || true
+          echo "Logs downloaded to /tmp/ci-logs/full-logs.txt"
+
+      - name: Analyze logs for failure type
+        id: analyze-logs
+        run: |
+          # Extract error patterns from logs
+          grep -i "error\|fail\|fatal" /tmp/ci-logs/full-logs.txt > /tmp/ci-logs/errors.log || echo "No errors found in grep"
+          
+          # Detect failure type based on log patterns
+          FAILURE_TYPE="unknown"
+          if grep -qi "go build" /tmp/ci-logs/errors.log; then
+            FAILURE_TYPE="build_error_go"
+          elif grep -qi "mvn\|maven\|gradle" /tmp/ci-logs/errors.log; then
+            FAILURE_TYPE="build_error_java"
+          elif grep -qi "npm\|yarn\|pnpm" /tmp/ci-logs/errors.log; then
+            FAILURE_TYPE="build_error_node"
+          elif grep -qi "deploy\|deployment" /tmp/ci-logs/errors.log; then
+            FAILURE_TYPE="deploy_error"
+          elif grep -qi "test.*fail" /tmp/ci-logs/errors.log; then
+            FAILURE_TYPE="test_failure"
+          fi
+          
+          echo "failure_type=$FAILURE_TYPE" >> $GITHUB_OUTPUT
+          echo "Detected failure type: $FAILURE_TYPE"
+
+      - name: Create fix branch
+        id: create-branch
+        run: |
+          # Determine service name from failed_services or use 'ci'
+          SERVICE="${{ inputs.failed_services }}"
+          if [ -z "$SERVICE" ]; then
+            SERVICE="ci"
+          else
+            # Use first service if multiple provided
+            SERVICE=$(echo "$SERVICE" | cut -d',' -f1 | tr -d ' ')
+          fi
+          
+          # Get short SHA
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          
+          # Create branch name
+          BRANCH_NAME="${{ inputs.branch_prefix }}-${SERVICE}-${SHORT_SHA}"
+          
+          # Create and push branch
+          git checkout -b "$BRANCH_NAME"
+          git push -u origin "$BRANCH_NAME"
+          
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "Created branch: $BRANCH_NAME"
+
+      - name: Write instruction file
+        run: |
+          cat > /tmp/auggie-instructions.md << 'EOF'
+          # CI Build Failure Triage and Fix
+
+          ## Context
+          - **Failed Workflow Run**: ${{ inputs.workflow_run_id }}
+          - **Source Branch**: ${{ inputs.source_branch }}
+          - **Failure Type**: ${{ steps.analyze-logs.outputs.failure_type }}
+          - **Failed Services**: ${{ inputs.failed_services || 'Not specified' }}
+          - **Repository**: ${{ github.repository }}
+          - **Workflow Run URL**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ inputs.workflow_run_id }}
+
+          ## Your Task
+          1. **Analyze CI logs** located at `/tmp/ci-logs/errors.log` (filtered errors) and `/tmp/ci-logs/full-logs.txt` (complete logs)
+          2. **Locate the failing code** that caused the build/test failure
+          3. **Diagnose the root cause** of the failure
+          4. **Implement a minimal, targeted fix** that addresses the root cause
+          5. **Commit your changes** with a clear, descriptive commit message
+          6. **Create a Pull Request** with:
+             - Title format: `fix($SERVICE): $DESCRIPTION`
+             - Body including:
+               - Root cause analysis
+               - Changes made
+               - Link to failed workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ inputs.workflow_run_id }}
+               - Marker comment: `<!-- auggie-triage-fix -->`
+
+          ## Additional Instructions
+          ${{ inputs.custom_instructions }}
+
+          ## Guidelines
+          - Focus on fixing the immediate build/test failure
+          - Keep changes minimal and targeted
+          - Ensure your fix doesn't introduce new issues
+          - If the fix requires significant refactoring, document why in the PR
+          EOF
+          
+          echo "Instruction file created at /tmp/auggie-instructions.md"
+
+      - name: Run Augment Agent
+        uses: augmentcode/augment-agent@v0
+        with:
+          augment_session_auth: ${{ secrets.augment_session_auth }}
+          github_token: ${{ secrets.gh_token }}
+          instruction_file: /tmp/auggie-instructions.md
+          model: ${{ inputs.model }}
+
