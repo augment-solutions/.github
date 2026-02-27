@@ -1,0 +1,113 @@
+name: Augment Direct Implementation (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      issue_number:
+        description: 'Issue number to implement'
+        required: true
+        type: number
+      issue_title:
+        description: 'Issue title'
+        required: true
+        type: string
+      issue_body:
+        description: 'Issue body/description'
+        required: true
+        type: string
+      issue_comments:
+        description: 'Issue comments (optional)'
+        required: false
+        type: string
+        default: ''
+      branch_name:
+        description: 'Feature branch name to create and use'
+        required: true
+        type: string
+      custom_instructions:
+        description: 'Additional custom instructions for the agent (optional)'
+        required: false
+        type: string
+        default: ''
+      model:
+        description: 'Model to use for the agent (optional)'
+        required: false
+        type: string
+        default: ''
+
+    secrets:
+      augment_session_auth:
+        required: true
+      gh_token:
+        required: true
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.gh_token }}
+          fetch-depth: 0
+
+      - name: Set up git config
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create feature branch
+        run: |
+          git checkout -b ${{ inputs.branch_name }}
+
+      - name: Write instruction file
+        run: |
+          cat > .augment-instructions.md << 'EOF'
+          # Implementation Task
+
+          ## Issue Information
+          **Issue #${{ inputs.issue_number }}**: ${{ inputs.issue_title }}
+
+          ### Description
+          ${{ inputs.issue_body }}
+
+          ### Comments
+          ${{ inputs.issue_comments }}
+
+          ## Your Task
+
+          You are tasked with implementing the requirements described in the issue above.
+
+          ### Instructions:
+          1. **Analyze the requirements**: Carefully read the issue description and ALL comments to understand what needs to be implemented.
+          2. **Search the codebase**: Use codebase-retrieval to find relevant files and understand the existing code structure.
+          3. **Implement the changes**: Make the necessary code changes to fulfill the requirements.
+          4. **Commit your changes**: Commit with the message: `feat: [brief description] (fixes #${{ inputs.issue_number }})`
+          5. **Create a Pull Request**: 
+             - Title: `feat: ${{ inputs.issue_title }}`
+             - Body should include: `Closes #${{ inputs.issue_number }}`
+             - Add the marker comment: `<!-- auggie-direct-pr -->`
+          6. **Comment on the issue**: Post a comment on issue #${{ inputs.issue_number }} with a link to the PR you created.
+
+          ### Important Guidelines:
+          - If you are uncertain about any requirement, ask clarifying questions instead of making assumptions.
+          - Follow existing code patterns and conventions in the repository.
+          - Ensure your implementation is complete and addresses all aspects of the issue.
+          - Test your changes if applicable.
+
+          ${{ inputs.custom_instructions }}
+          EOF
+
+      - name: Run Augment Agent
+        uses: augmentcode/augment-agent@v0
+        with:
+          augment_session_auth: ${{ secrets.augment_session_auth }}
+          github_token: ${{ secrets.gh_token }}
+          instruction_file: .augment-instructions.md
+          model: ${{ inputs.model }}
+
