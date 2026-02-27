@@ -1,0 +1,83 @@
+# Augment Test Generation Caller Template
+# 
+# This workflow triggers test generation when a user comments `/auggieTestGenerate` on a PR.
+# It calls the org-wide reusable workflow for test generation.
+#
+# Customization options:
+# - Trigger command: Change the command pattern in the "Check for trigger command" step
+# - Test framework: Set test_framework input (e.g., 'pytest', 'jest', 'go')
+# - Test directory: Set test_directory input to specify where tests should be placed
+# - Custom instructions: Add additional instructions via custom_instructions input
+
+name: Augment Test Generation
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  trigger-test-generation:
+    # Only run on PR comments (not issue comments)
+    if: github.event.issue.pull_request != null
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Check for trigger command
+        id: check-command
+        run: |
+          COMMENT="${{ github.event.comment.body }}"
+          if echo "$COMMENT" | grep -q "/auggieTestGenerate"; then
+            echo "triggered=true" >> $GITHUB_OUTPUT
+          else
+            echo "triggered=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Add rocket reaction to trigger comment
+        if: steps.check-command.outputs.triggered == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket'
+            });
+
+      - name: Get PR branch and SHA
+        if: steps.check-command.outputs.triggered == 'true'
+        id: pr-info
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            core.setOutput('head_ref', pr.data.head.ref);
+            core.setOutput('head_sha', pr.data.head.sha);
+
+      - name: Call org-wide test generation workflow
+        if: steps.check-command.outputs.triggered == 'true'
+        uses: augment-solutions/.github/.github/workflows/org-test-generate.yml@main
+        with:
+          pr_number: ${{ github.event.issue.number }}
+          head_ref: ${{ steps.pr-info.outputs.head_ref }}
+          head_sha: ${{ steps.pr-info.outputs.head_sha }}
+          # Customize these inputs as needed:
+          # test_framework: 'pytest'  # Options: pytest, jest, go, etc.
+          # test_directory: 'tests/'  # Where to place generated tests
+          # custom_instructions: |
+          #   Additional instructions for test generation
+          # model: 'sonnet4.5'  # AI model to use
+        secrets:
+          augment_session_auth: ${{ secrets.AUGMENT_SESSION_AUTH }}
+          gh_token: ${{ secrets.GH_TOKEN }}
+

@@ -1,0 +1,196 @@
+# Auggie Implementation Plan Workflow Template
+#
+# This workflow automatically generates implementation plans for GitHub issues
+# using Augment's AI agent when triggered by a label or command.
+#
+# SETUP INSTRUCTIONS:
+# 1. Copy this file to your repository's .github/workflows/ directory
+# 2. Customize the trigger label name (default: "auggieImplementPlan")
+# 3. Add project-specific context in the custom_instructions section
+# 4. Add the AUGMENT_SESSION_AUTH secret to your repository settings
+#
+# USAGE:
+# - Add the "auggieImplementPlan" label to any issue to trigger plan generation
+# - Or comment "/auggieImplementPlan" on an issue
+
+name: Auggie Implementation Plan
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-trigger:
+    name: Check Trigger Conditions
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+      issue_number: ${{ steps.check.outputs.issue_number }}
+      issue_title: ${{ steps.check.outputs.issue_title }}
+      issue_body: ${{ steps.check.outputs.issue_body }}
+      issue_comments: ${{ steps.check.outputs.issue_comments }}
+
+    steps:
+      - name: Check if workflow should run
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let shouldRun = false;
+            let issueNumber, issueTitle, issueBody, issueComments = '';
+
+            // CUSTOMIZE: Change the label name here if you want to use a different trigger label
+            const TRIGGER_LABEL = 'auggieImplementPlan';
+            const TRIGGER_COMMAND = '/auggieImplementPlan';
+
+            // Check if triggered by label
+            if (context.eventName === 'issues' && context.payload.action === 'labeled') {
+              if (context.payload.label.name === TRIGGER_LABEL) {
+                shouldRun = true;
+                issueNumber = context.payload.issue.number;
+                issueTitle = context.payload.issue.title;
+                issueBody = context.payload.issue.body || '';
+              }
+            }
+
+            // Check if triggered by comment command
+            if (context.eventName === 'issue_comment' && context.payload.action === 'created') {
+              const commentBody = context.payload.comment.body.trim();
+              if (commentBody.includes(TRIGGER_COMMAND)) {
+                shouldRun = true;
+                issueNumber = context.payload.issue.number;
+                issueTitle = context.payload.issue.title;
+                issueBody = context.payload.issue.body || '';
+
+                // Add reaction to comment
+                await github.rest.reactions.createForIssueComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: context.payload.comment.id,
+                  content: 'eyes'
+                });
+              }
+            }
+
+            // Extract all comments if workflow should run
+            if (shouldRun) {
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber
+              });
+
+              // Format comments with author and timestamp
+              issueComments = comments.data
+                .map(c => `**@${c.user.login}** (${c.created_at}):\n${c.body}`)
+                .join('\n\n---\n\n');
+            }
+
+            core.setOutput('should_run', shouldRun.toString());
+            core.setOutput('issue_number', issueNumber?.toString() || '');
+            core.setOutput('issue_title', issueTitle || '');
+            core.setOutput('issue_body', issueBody || '');
+            core.setOutput('issue_comments', issueComments);
+
+  add-in-progress-label:
+    name: Add In-Progress Label
+    needs: check-trigger
+    if: needs.check-trigger.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Add auggie-in-progress label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ needs.check-trigger.outputs.issue_number }},
+              labels: ['auggie-in-progress']
+            });
+
+  generate-plan:
+    name: Generate Implementation Plan
+    needs: check-trigger
+    if: needs.check-trigger.outputs.should_run == 'true'
+    uses: augment-solutions/.github/.github/workflows/org-implementation-plan.yml@main
+    with:
+      issue_number: ${{ fromJSON(needs.check-trigger.outputs.issue_number) }}
+      issue_title: ${{ needs.check-trigger.outputs.issue_title }}
+      issue_body: ${{ needs.check-trigger.outputs.issue_body }}
+      issue_comments: ${{ needs.check-trigger.outputs.issue_comments }}
+
+      # CUSTOMIZE: Add project-specific instructions here
+      # This helps the AI understand your project's context, conventions, and requirements
+      custom_instructions: |
+        ## Project Context
+        - Add your project-specific context here
+        - Include coding standards, architectural patterns, or conventions to follow
+        - Mention any specific frameworks, libraries, or tools used in your project
+        - Note any special requirements or constraints
+
+        ## Examples:
+        # - This project uses TypeScript with strict mode enabled
+        # - Follow the repository's existing error handling patterns
+        # - All new features must include unit tests using Jest
+        # - API changes must maintain backward compatibility
+
+      # OPTIONAL: Specify AI model (leave empty for default)
+      # model: 'claude-3-5-sonnet-20241022'
+
+    secrets:
+      # REQUIRED: Add AUGMENT_SESSION_AUTH to your repository secrets
+      augment_session_auth: ${{ secrets.AUGMENT_SESSION_AUTH }}
+      # OPTIONAL: Use a custom GitHub token if needed (defaults to github.token)
+      # gh_token: ${{ secrets.GITHUB_TOKEN }}
+
+  update-labels:
+    name: Update Labels on Completion
+    needs: [check-trigger, generate-plan]
+    if: always() && needs.check-trigger.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Remove in-progress label and add completion label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = ${{ needs.check-trigger.outputs.issue_number }};
+
+            // Remove auggie-in-progress label
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                name: 'auggie-in-progress'
+              });
+            } catch (error) {
+              console.log('Label auggie-in-progress not found or already removed');
+            }
+
+            // Add plan-ready label on success
+            if ('${{ needs.generate-plan.result }}' === 'success') {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: ['plan-ready']
+              });
+
+              // Add rocket reaction to issue
+              await github.rest.reactions.createForIssue({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                content: 'rocket'
+              });
+            }
+

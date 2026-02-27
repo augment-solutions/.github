@@ -1,0 +1,143 @@
+name: Generate Technical Specification (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      # Issue context
+      issue_number:
+        description: 'Issue number to generate spec for'
+        required: true
+        type: number
+      issue_title:
+        description: 'Issue title'
+        required: true
+        type: string
+      issue_body:
+        description: 'Issue body/description'
+        required: true
+        type: string
+      
+      # Agent configuration
+      custom_instructions:
+        description: 'Additional custom instructions for spec generation'
+        required: false
+        type: string
+        default: ''
+      model:
+        description: 'AI model to use for spec generation'
+        required: false
+        type: string
+        default: ''
+      rules:
+        description: 'Custom rules for the agent'
+        required: false
+        type: string
+        default: ''
+      mcp_configs:
+        description: 'MCP configurations for the agent'
+        required: false
+        type: string
+        default: ''
+
+    secrets:
+      augment_session_auth:
+        required: true
+      gh_token:
+        required: false
+
+jobs:
+  generate-spec:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create instruction file
+        run: |
+          cat > /tmp/spec-instruction.md << 'EOF'
+          # Technical Specification Generation Task
+
+          You are tasked with analyzing the following issue and generating a comprehensive technical specification.
+
+          ## Issue Context
+          **Issue #${{ inputs.issue_number }}**: ${{ inputs.issue_title }}
+
+          **Description:**
+          ${{ inputs.issue_body }}
+
+          ## Your Task
+
+          1. **Analyze the Requirements**: Carefully read and understand what is being requested in the issue.
+
+          2. **Search the Codebase**: Use codebase-retrieval to find:
+             - Existing patterns and conventions that should be followed
+             - Similar implementations that can serve as reference
+             - Files that will need to be modified or created
+             - Related tests and documentation
+
+          3. **Generate a Comprehensive Technical Specification** that includes:
+             
+             ### Summary
+             - Brief overview of the proposed changes
+             - Key objectives and goals
+             
+             ### Scope
+             - What will be changed/added
+             - What is explicitly out of scope
+             
+             ### Files to Modify/Create
+             - List each file with a brief description of changes needed
+             - Indicate whether it's a new file or modification
+             
+             ### Implementation Approach
+             - Step-by-step implementation plan
+             - Key technical decisions and rationale
+             - Design patterns to follow
+             - Dependencies or prerequisites
+             
+             ### Testing Strategy
+             - What tests need to be added/modified
+             - Test scenarios to cover
+             
+             ### Risks and Considerations
+             - Potential challenges or edge cases
+             - Breaking changes or migration needs
+             - Performance or security implications
+             
+             ### Estimated Complexity
+             - Complexity rating (Low/Medium/High)
+             - Estimated effort
+             - Any blockers or dependencies
+
+          4. **Post the Specification**: 
+             - Post your complete specification as a comment on issue #${{ inputs.issue_number }}
+             - Include the marker `<!-- auggie-spec-comment -->` at the top of your comment
+             - End your comment with: "Reply with `/auggieImplementPlan` to proceed with implementation"
+
+          ## Custom Instructions
+          ${{ inputs.custom_instructions }}
+
+          ## Guidelines
+          - Be thorough but concise
+          - Follow existing codebase patterns and conventions
+          - Consider maintainability and testability
+          - Flag any ambiguities or questions that need clarification
+          - Use markdown formatting for readability
+          EOF
+
+      - name: Generate specification with Augment Agent
+        uses: augmentcode/augment-agent@v0
+        with:
+          augment_session_auth: ${{ secrets.augment_session_auth }}
+          github_token: ${{ secrets.gh_token || github.token }}
+          instruction_file: /tmp/spec-instruction.md
+          model: ${{ inputs.model }}
+          rules: ${{ inputs.rules }}
+          mcp_configs: ${{ inputs.mcp_configs }}
+

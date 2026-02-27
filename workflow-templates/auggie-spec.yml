@@ -1,0 +1,152 @@
+# Auggie Spec Generation Workflow Template
+#
+# This workflow automatically generates technical specifications for GitHub issues
+# using Augment's AI agent when triggered by a label or command.
+#
+# SETUP INSTRUCTIONS:
+# 1. Copy this file to your repository's .github/workflows/ directory
+# 2. Customize the trigger label name (default: "auggieSpec")
+# 3. Add project-specific context in the custom_instructions section
+# 4. Add the AUGMENT_SESSION_AUTH secret to your repository settings
+#
+# USAGE:
+# - Add the "auggieSpec" label to any issue to trigger spec generation
+# - Or comment "/auggieApproveSpec" on an issue (legacy support)
+
+name: Auggie Spec Generation
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-trigger:
+    name: Check Trigger Conditions
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+      issue_number: ${{ steps.check.outputs.issue_number }}
+      issue_title: ${{ steps.check.outputs.issue_title }}
+      issue_body: ${{ steps.check.outputs.issue_body }}
+    
+    steps:
+      - name: Check if workflow should run
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let shouldRun = false;
+            let issueNumber, issueTitle, issueBody;
+
+            // CUSTOMIZE: Change the label name here if you want to use a different trigger label
+            const TRIGGER_LABEL = 'auggieSpec';
+            const TRIGGER_COMMAND = '/auggieApproveSpec';
+
+            if (context.eventName === 'issues') {
+              // Triggered by label
+              const label = context.payload.label?.name;
+              if (label === TRIGGER_LABEL) {
+                shouldRun = true;
+                issueNumber = context.payload.issue.number;
+                issueTitle = context.payload.issue.title;
+                issueBody = context.payload.issue.body || '';
+                
+                // Add eyes reaction to show we're processing
+                await github.rest.reactions.createForIssue({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  content: 'eyes'
+                });
+              }
+            } else if (context.eventName === 'issue_comment') {
+              // Triggered by comment command (legacy support)
+              const comment = context.payload.comment?.body || '';
+              if (comment.trim() === TRIGGER_COMMAND) {
+                shouldRun = true;
+                issueNumber = context.payload.issue.number;
+                issueTitle = context.payload.issue.title;
+                issueBody = context.payload.issue.body || '';
+                
+                // Add eyes reaction to the comment
+                await github.rest.reactions.createForIssueComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: context.payload.comment.id,
+                  content: 'eyes'
+                });
+              }
+            }
+
+            core.setOutput('should_run', shouldRun.toString());
+            core.setOutput('issue_number', issueNumber?.toString() || '');
+            core.setOutput('issue_title', issueTitle || '');
+            core.setOutput('issue_body', issueBody || '');
+
+  generate-spec:
+    name: Generate Technical Specification
+    needs: check-trigger
+    if: needs.check-trigger.outputs.should_run == 'true'
+    uses: augment-solutions/.github/.github/workflows/org-spec-generate.yml@main
+    with:
+      issue_number: ${{ fromJSON(needs.check-trigger.outputs.issue_number) }}
+      issue_title: ${{ needs.check-trigger.outputs.issue_title }}
+      issue_body: ${{ needs.check-trigger.outputs.issue_body }}
+      
+      # CUSTOMIZE: Add project-specific instructions here
+      # This helps the AI understand your project's context, conventions, and requirements
+      custom_instructions: |
+        ## Project Context
+        - Add your project-specific context here
+        - Include coding standards, architectural patterns, or conventions to follow
+        - Mention any specific frameworks, libraries, or tools used in your project
+        - Note any special requirements or constraints
+        
+        ## Examples:
+        # - This project uses TypeScript with strict mode enabled
+        # - Follow the repository's existing error handling patterns
+        # - All new features must include unit tests using Jest
+        # - API changes must maintain backward compatibility
+      
+      # OPTIONAL: Specify AI model (leave empty for default)
+      # model: 'claude-3-5-sonnet-20241022'
+      
+      # OPTIONAL: Add custom rules for the agent
+      # rules: ''
+      
+      # OPTIONAL: Add MCP configurations
+      # mcp_configs: ''
+    
+    secrets:
+      # REQUIRED: Add AUGMENT_SESSION_AUTH to your repository secrets
+      augment_session_auth: ${{ secrets.AUGMENT_SESSION_AUTH }}
+      # OPTIONAL: Use a custom GitHub token if needed (defaults to github.token)
+      # gh_token: ${{ secrets.GITHUB_TOKEN }}
+
+  add-completion-reaction:
+    name: Add Completion Reaction
+    needs: [check-trigger, generate-spec]
+    if: always() && needs.check-trigger.outputs.should_run == 'true' && needs.generate-spec.result == 'success'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Add rocket reaction
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = ${{ needs.check-trigger.outputs.issue_number }};
+            
+            // Add rocket reaction to indicate completion
+            await github.rest.reactions.createForIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              content: 'rocket'
+            });
+

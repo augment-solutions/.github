@@ -1,0 +1,126 @@
+name: Augment Implementation Plan (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      issue_number:
+        description: 'Issue number to create implementation plan for'
+        required: true
+        type: number
+      issue_title:
+        description: 'Issue title'
+        required: true
+        type: string
+      issue_body:
+        description: 'Issue body/description'
+        required: true
+        type: string
+      issue_comments:
+        description: 'Previous discussion/comments on the issue'
+        required: false
+        type: string
+        default: ''
+      custom_instructions:
+        description: 'Additional custom instructions for the agent'
+        required: false
+        type: string
+        default: ''
+      model:
+        description: 'Model to use for the agent'
+        required: false
+        type: string
+        default: ''
+
+    secrets:
+      augment_session_auth:
+        required: true
+      gh_token:
+        required: false
+
+jobs:
+  create-plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Write instruction file
+        run: |
+          cat > instruction.md << 'EOF'
+          # Implementation Plan Request
+
+          ## Issue Context
+          **Title:** ${{ inputs.issue_title }}
+          **Issue #:** ${{ inputs.issue_number }}
+
+          ### Description
+          ${{ inputs.issue_body }}
+
+          ### Previous Discussion
+          ${{ inputs.issue_comments }}
+
+          ## Your Task
+
+          Analyze the issue description AND all comments above to understand the full context and requirements.
+
+          Search the codebase for relevant patterns, similar implementations, and affected files.
+
+          Create a CONCISE, STRUCTURED implementation plan following this exact format:
+
+          ```markdown
+          ## 📋 Implementation Plan
+
+          ### 🎯 Summary
+          [2-3 sentence overview of what needs to be done]
+
+          ### 📂 Files to Modify
+          - `path/to/file1.ext` - [brief reason]
+          - `path/to/file2.ext` - [brief reason]
+
+          ### ✅ Tasks
+          1. [Specific task with clear acceptance criteria]
+          2. [Specific task with clear acceptance criteria]
+          3. [Specific task with clear acceptance criteria]
+
+          ### ⚠️ Considerations
+          - [Important technical consideration or edge case]
+          - [Potential impact or dependency]
+
+          ### 🧪 Testing
+          - [What tests need to be added/modified]
+          - [How to verify the implementation]
+          ```
+
+          ## Posting Instructions
+
+          Post your implementation plan as a comment on issue #${{ inputs.issue_number }}.
+
+          **IMPORTANT:** Include this exact marker in your comment:
+          ```
+          <!-- auggie-plan-comment -->
+          ```
+
+          End your comment with:
+          ```
+          ---
+          💡 **Ready to implement?** Reply with `/auggieImplementDirect` to auto-implement this plan.
+          ```
+
+          ## Additional Instructions
+          ${{ inputs.custom_instructions }}
+          EOF
+
+      - name: Generate Implementation Plan
+        uses: augmentcode/augment-agent@v0
+        with:
+          augment_session_auth: ${{ secrets.augment_session_auth }}
+          github_token: ${{ secrets.gh_token || github.token }}
+          instruction_file: instruction.md
+          model: ${{ inputs.model }}
+

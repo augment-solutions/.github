@@ -1,0 +1,14 @@
+{
+  "name": "Augment Implementation Plan Workflow",
+  "description": "Automatically generate implementation plans for issues using Augment AI. Triggered by label 'auggieImplementPlan' or comment '/auggieImplementPlan'.",
+  "iconName": "rocket",
+  "categories": [
+    "Automation",
+    "Code Review",
+    "Project Management"
+  ],
+  "filePatterns": [
+    "auggie-plan.yml"
+  ]
+}
+

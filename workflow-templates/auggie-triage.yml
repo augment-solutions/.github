@@ -1,0 +1,130 @@
+# Augment Build Triage - Caller Template
+#
+# This workflow template allows you to manually trigger build triage for failed CI runs.
+# It calls the reusable workflow from augment-solutions/.github to analyze failures and create fix PRs.
+#
+# CUSTOMIZATION OPTIONS:
+# 1. Branch Prefix: Change the default branch prefix for fix branches (default: 'auggie/fix')
+# 2. Custom Instructions: Add repository-specific instructions for the agent
+# 3. Model: Specify a different AI model if needed
+# 4. Slack Integration: Uncomment the Slack notification step to get alerts (requires SLACK_WEBHOOK_URL secret)
+#
+# SETUP REQUIRED:
+# - Add AUGMENT_SESSION_AUTH secret to your repository
+# - Add GH_TOKEN secret (GitHub token with repo and workflow permissions)
+# - Optional: Add SLACK_WEBHOOK_URL secret for Slack notifications
+
+name: Augment Build Triage
+
+on:
+  workflow_dispatch:
+    inputs:
+      workflow_run_id:
+        description: 'Failed workflow run ID to triage'
+        required: true
+        type: string
+      failed_services:
+        description: 'Comma-separated list of failed services (optional)'
+        required: false
+        type: string
+      source_branch:
+        description: 'Branch where the failure occurred'
+        required: false
+        default: 'main'
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  triage:
+    name: Triage Build Failure
+    uses: augment-solutions/.github/.github/workflows/org-build-triage.yml@main
+    with:
+      workflow_run_id: ${{ inputs.workflow_run_id }}
+      source_branch: ${{ inputs.source_branch }}
+      failed_services: ${{ inputs.failed_services }}
+      
+      # CUSTOMIZATION: Change the branch prefix for fix branches
+      # Default: 'auggie/fix' creates branches like 'auggie/fix-service-abc123'
+      branch_prefix: 'auggie/fix'
+      
+      # CUSTOMIZATION: Add repository-specific instructions for the agent
+      # Example: 'Ensure all changes follow our coding standards in CONTRIBUTING.md'
+      custom_instructions: ''
+      
+      # CUSTOMIZATION: Specify a different model if needed
+      # Leave empty to use the default model
+      model: ''
+    
+    secrets:
+      augment_session_auth: ${{ secrets.AUGMENT_SESSION_AUTH }}
+      gh_token: ${{ secrets.GH_TOKEN }}
+
+  post-summary:
+    name: Post Summary
+    needs: triage
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Post workflow summary
+        run: |
+          echo "## 🔍 Build Triage Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Workflow Run ID:** ${{ inputs.workflow_run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Source Branch:** ${{ inputs.source_branch }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Failed Services:** ${{ inputs.failed_services || 'Not specified' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.triage.result }}" == "success" ]; then
+            echo "✅ **Status:** Triage completed successfully" >> $GITHUB_STEP_SUMMARY
+            echo "**Fix Branch:** \`${{ needs.triage.outputs.fix_branch }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Failure Type:** ${{ needs.triage.outputs.failure_type }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🔗 [View this workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Status:** Triage failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Please check the workflow logs for details." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # CUSTOMIZATION: Slack Notifications
+      # Uncomment the following step to enable Slack notifications
+      # You'll need to add a SLACK_WEBHOOK_URL secret to your repository
+      #
+      # - name: Notify Slack
+      #   if: always()
+      #   uses: slackapi/slack-github-action@v1
+      #   with:
+      #     payload: |
+      #       {
+      #         "text": "Build Triage ${{ needs.triage.result == 'success' && 'Completed' || 'Failed' }}",
+      #         "blocks": [
+      #           {
+      #             "type": "section",
+      #             "text": {
+      #               "type": "mrkdwn",
+      #               "text": "*Build Triage ${{ needs.triage.result == 'success' && '✅' || '❌' }}*\n*Workflow:* ${{ inputs.workflow_run_id }}\n*Branch:* ${{ inputs.source_branch }}\n*Fix Branch:* ${{ needs.triage.outputs.fix_branch || 'N/A' }}\n*Failure Type:* ${{ needs.triage.outputs.failure_type || 'Unknown' }}"
+      #             }
+      #           },
+      #           {
+      #             "type": "actions",
+      #             "elements": [
+      #               {
+      #                 "type": "button",
+      #                 "text": {
+      #                   "type": "plain_text",
+      #                   "text": "View Workflow"
+      #                 },
+      #                 "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      #               }
+      #             ]
+      #           }
+      #         ]
+      #       }
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
