@@ -26,6 +26,10 @@ on:
         required: false
         type: string
         default: 'npm'
+      pull_number:
+        description: 'PR number to review'
+        required: true
+        type: number
 
       # Review configuration
       custom_guidelines:
@@ -71,7 +75,7 @@ jobs:
         with:
           augment_session_auth: ${{ secrets.augment_session_auth }}
           github_token: ${{ secrets.gh_token || github.token }}
-          pull_number: ${{ github.event.pull_request.number }}
+          pull_number: ${{ inputs.pull_number }}
           repo_name: ${{ github.repository }}
           custom_guidelines: |
             ## Base Code Review Guidelines
