@@ -68,7 +68,9 @@ jobs:
     needs: triage
     runs-on: ubuntu-latest
     if: always()
-    
+    permissions:
+      actions: read  # For reading workflow outputs
+
     steps:
       - name: Post workflow summary
         run: |

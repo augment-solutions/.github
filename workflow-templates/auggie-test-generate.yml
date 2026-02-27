@@ -21,9 +21,7 @@ jobs:
     if: github.event.issue.pull_request != null
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: write
-      issues: write
+      pull-requests: write  # For adding reactions
     outputs:
       triggered: ${{ steps.check-command.outputs.triggered }}
       pr_number: ${{ steps.pr-info.outputs.pr_number }}

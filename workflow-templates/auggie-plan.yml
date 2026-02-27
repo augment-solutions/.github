@@ -29,6 +29,8 @@ jobs:
   check-trigger:
     name: Check Trigger Conditions
     runs-on: ubuntu-latest
+    permissions:
+      issues: write  # For adding reactions
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
       issue_number: ${{ steps.check.outputs.issue_number }}
@@ -103,6 +105,8 @@ jobs:
     needs: check-trigger
     if: needs.check-trigger.outputs.should_run == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      issues: write  # For adding labels
 
     steps:
       - name: Add auggie-in-progress label
@@ -156,6 +160,8 @@ jobs:
     needs: [check-trigger, generate-plan]
     if: always() && needs.check-trigger.outputs.should_run == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      issues: write  # For managing labels and reactions
 
     steps:
       - name: Remove in-progress label and add completion label

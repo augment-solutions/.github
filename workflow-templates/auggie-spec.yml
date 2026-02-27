@@ -29,6 +29,8 @@ jobs:
   check-trigger:
     name: Check Trigger Conditions
     runs-on: ubuntu-latest
+    permissions:
+      issues: write  # For adding reactions
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
       issue_number: ${{ steps.check.outputs.issue_number }}
@@ -134,7 +136,9 @@ jobs:
     needs: [check-trigger, generate-spec]
     if: always() && needs.check-trigger.outputs.should_run == 'true' && needs.generate-spec.result == 'success'
     runs-on: ubuntu-latest
-    
+    permissions:
+      issues: write  # For adding reactions
+
     steps:
       - name: Add rocket reaction
         uses: actions/github-script@v7

@@ -21,6 +21,8 @@ on:
 jobs:
   check-trigger:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
     steps:
@@ -53,6 +55,7 @@ jobs:
     permissions:
       contents: read
       issues: write
+      pull-requests: write  # For adding reactions to comments
     outputs:
       issue_number: ${{ steps.extract.outputs.issue_number }}
       issue_title: ${{ steps.extract.outputs.issue_title }}
