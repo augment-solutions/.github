@@ -1,0 +1,164 @@
+# Auggie Direct Implementation Caller Template
+#
+# This workflow template triggers direct implementation when:
+# 1. Label 'auggieImplementDirect' is added to an issue
+# 2. Comment '/auggieImplementDirect' is posted on an issue
+#
+# Customization points:
+# - LABEL_NAME: Change 'auggieImplementDirect' to your preferred label
+# - BRANCH_PREFIX: Change 'auggie/issue' to your preferred branch prefix
+# - CUSTOM_INSTRUCTIONS: Add project-specific instructions for the agent
+# - MODEL: Specify a different AI model if needed
+
+name: Auggie Direct Implementation
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+
+jobs:
+  check-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Check if workflow should run
+        id: check
+        run: |
+          SHOULD_RUN="false"
+          
+          # Check if triggered by label
+          if [ "${{ github.event_name }}" = "issues" ]; then
+            if [ "${{ github.event.label.name }}" = "auggieImplementDirect" ]; then
+              SHOULD_RUN="true"
+            fi
+          fi
+          
+          # Check if triggered by slash command
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            COMMENT_BODY="${{ github.event.comment.body }}"
+            if echo "$COMMENT_BODY" | grep -q "^/auggieImplementDirect"; then
+              SHOULD_RUN="true"
+            fi
+          fi
+          
+          echo "should_run=$SHOULD_RUN" >> $GITHUB_OUTPUT
+
+  implement:
+    needs: check-trigger
+    if: needs.check-trigger.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    
+    steps:
+      - name: Add rocket reaction
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issueNumber = context.issue.number;
+            
+            // Add reaction to issue or comment
+            if (context.eventName === 'issue_comment') {
+              await github.rest.reactions.createForIssueComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: context.payload.comment.id,
+                content: 'rocket'
+              });
+            } else {
+              await github.rest.reactions.createForIssue({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                content: 'rocket'
+              });
+            }
+
+      - name: Add in-progress label
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['auggie-in-progress']
+            });
+
+      - name: Extract issue details
+        id: extract
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            
+            // Get all comments
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number
+            });
+            
+            // Format comments
+            const formattedComments = comments.data.map(comment => {
+              return `**@${comment.user.login}** (${comment.created_at}):\n${comment.body}\n`;
+            }).join('\n---\n\n');
+            
+            // Generate branch name slug (max 50 chars)
+            const slug = issue.title
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, '-')
+              .substring(0, 50)
+              .replace(/^-+|-+$/g, '');
+            
+            const branchName = `auggie/issue-${issue.number}-${slug}`;
+            
+            // Set outputs
+            core.setOutput('issue_number', issue.number);
+            core.setOutput('issue_title', issue.title);
+            core.setOutput('issue_body', issue.body || '');
+            core.setOutput('issue_comments', formattedComments);
+            core.setOutput('branch_name', branchName);
+
+      - name: Call reusable implementation workflow
+        uses: augment-solutions/.github/.github/workflows/org-implement-direct.yml@main
+        with:
+          issue_number: ${{ steps.extract.outputs.issue_number }}
+          issue_title: ${{ steps.extract.outputs.issue_title }}
+          issue_body: ${{ steps.extract.outputs.issue_body }}
+          issue_comments: ${{ steps.extract.outputs.issue_comments }}
+          branch_name: ${{ steps.extract.outputs.branch_name }}
+          # Customize these as needed:
+          # custom_instructions: |
+          #   Additional project-specific instructions here
+          # model: 'claude-3-5-sonnet-20241022'
+        secrets:
+          augment_session_auth: ${{ secrets.AUGMENT_SESSION_AUTH }}
+          gh_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Remove in-progress label
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                name: 'auggie-in-progress'
+              });
+            } catch (error) {
+              // Label might not exist, ignore error
+              console.log('Could not remove label:', error.message);
+            }
+
