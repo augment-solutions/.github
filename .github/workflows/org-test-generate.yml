@@ -1,0 +1,161 @@
+name: Augment Test Generation (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: 'PR number to generate tests for'
+        required: true
+        type: number
+      head_ref:
+        description: 'PR branch name'
+        required: true
+        type: string
+      head_sha:
+        description: 'Current commit SHA'
+        required: true
+        type: string
+      test_framework:
+        description: 'Test framework hint (pytest, jest, go, etc.)'
+        required: false
+        type: string
+        default: ''
+      test_directory:
+        description: 'Directory where tests should be placed'
+        required: false
+        type: string
+        default: ''
+      custom_instructions:
+        description: 'Additional custom instructions for test generation'
+        required: false
+        type: string
+        default: ''
+      model:
+        description: 'Model to use for test generation'
+        required: false
+        type: string
+        default: ''
+
+    secrets:
+      augment_session_auth:
+        required: true
+      gh_token:
+        required: true
+
+jobs:
+  generate-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.head_ref }}
+          token: ${{ secrets.gh_token }}
+          fetch-depth: 0
+
+      - name: Set up git config
+        run: |
+          git config --global user.name "augment-bot"
+          git config --global user.email "bot@augmentcode.com"
+
+      - name: Write instruction file
+        run: |
+          cat > .augment-instructions.md << 'EOF'
+          # Test Generation Instructions
+
+          ## Objective
+          Generate comprehensive tests for the changes in this PR.
+
+          ## Analysis Steps
+          1. Analyze the PR changes to identify files that need test coverage
+          2. Determine the appropriate test framework based on file type
+          ${{ inputs.test_framework != '' && format('   - Use {0} as the test framework', inputs.test_framework) || '   - Auto-detect from project structure (pytest for Python, jest for JavaScript/TypeScript, go test for Go, etc.)' }}
+          3. Review existing test patterns in the codebase to follow project conventions
+
+          ## Test Generation Requirements
+          - Generate tests following the project's existing test conventions
+          - Focus on:
+            * Happy path scenarios
+            * Edge cases and boundary conditions
+            * Error conditions and exception handling
+            * Input validation
+          - Mock external dependencies (APIs, databases, file systems)
+          - Use AAA pattern (Arrange-Act-Assert) for test structure
+          - Include descriptive test names that explain what is being tested
+          - Add appropriate assertions to verify expected behavior
+
+          ${{ inputs.test_directory != '' && format('## Test Location\nPlace tests in: {0}', inputs.test_directory) || '' }}
+
+          ${{ inputs.custom_instructions != '' && format('## Additional Instructions\n{0}', inputs.custom_instructions) || '' }}
+
+          ## Important Constraints
+          - DO NOT run the tests - only generate and commit them
+          - Commit all generated test files to the PR branch
+          - Follow the existing project structure and naming conventions
+          - Ensure tests are properly formatted according to project style
+
+          ## Deliverables
+          - Generate test files for all modified code in the PR
+          - Commit the test files with a clear commit message
+          - Ensure tests follow project conventions and best practices
+          EOF
+
+      - name: Generate tests with Augment Agent
+        uses: augmentcode/augment-agent@v0
+        with:
+          augment_session_auth: ${{ secrets.augment_session_auth }}
+          github_token: ${{ secrets.gh_token }}
+          instruction_file: '.augment-instructions.md'
+          model: ${{ inputs.model || 'default' }}
+
+      - name: Collect generated test files
+        id: collect-tests
+        run: |
+          # Get list of new test files added since head_sha
+          NEW_FILES=$(git diff --name-only ${{ inputs.head_sha }} HEAD | grep -E '(test_|_test\.|\.test\.|\.spec\.|_spec\.)' || echo "")
+          
+          if [ -z "$NEW_FILES" ]; then
+            echo "No test files were generated."
+            echo "test_files=" >> $GITHUB_OUTPUT
+          else
+            echo "Generated test files:"
+            echo "$NEW_FILES"
+            # Format as markdown list
+            TEST_LIST=$(echo "$NEW_FILES" | sed 's/^/- `/' | sed 's/$/`/')
+            # Use multiline output format
+            echo "test_files<<EOF" >> $GITHUB_OUTPUT
+            echo "$TEST_LIST" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Post summary comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.gh_token }}
+          script: |
+            const testFiles = `${{ steps.collect-tests.outputs.test_files }}`;
+            const body = testFiles 
+              ? `<!-- auggie-test-comment -->
+            ## 🧪 Test Generation Complete
+            
+            The following test files were generated:
+            
+            ${testFiles}
+            
+            Please review the generated tests and run them to ensure they pass.`
+              : `<!-- auggie-test-comment -->
+            ## 🧪 Test Generation Complete
+            
+            No new test files were generated. The agent may have determined that existing tests are sufficient or encountered an issue.`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ inputs.pr_number }},
+              body: body
+            });
+
