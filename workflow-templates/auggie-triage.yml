@@ -61,7 +61,7 @@ jobs:
     
     secrets:
       augment_session_auth: ${{ secrets.AUGMENT_SESSION_AUTH }}
-      gh_token: ${{ secrets.GH_TOKEN }}
+      gh_token: ${{ secrets.GITHUB_TOKEN }}
 
   post-summary:
     name: Post Summary
