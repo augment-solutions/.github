@@ -1,0 +1,105 @@
+# Auggie PR Review Caller Template
+#
+# This workflow template triggers PR review when:
+# 1. Comment '/auggiePRReview' is posted on a PR
+#
+# Customization points:
+# - TRIGGER_COMMAND: Change '/auggiePRReview' to your preferred command
+# - CUSTOM_GUIDELINES: Add project-specific review guidelines
+# - NODE_VERSION: Specify Node.js version if needed
+# - PACKAGE_MANAGER: Specify package manager (npm, yarn, pnpm)
+# - EXTERNAL_REPO: Reference external repository for context
+
+name: Auggie PR Review
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  check-comment:
+    # Only run on PR comments (not issue comments)
+    if: github.event.issue.pull_request != null
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+      pr_number: ${{ steps.check.outputs.pr_number }}
+    
+    steps:
+      - name: Check trigger and add reaction
+        id: check
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const comment = context.payload.comment.body;
+            const prNumber = context.issue.number;
+            
+            // CUSTOMIZE: Change the trigger command here
+            const TRIGGER_COMMAND = '/auggiePRReview';
+            
+            let shouldRun = false;
+            if (comment.trim().startsWith(TRIGGER_COMMAND)) {
+              shouldRun = true;
+              
+              // Add rocket reaction to indicate processing started
+              await github.rest.reactions.createForIssueComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: context.payload.comment.id,
+                content: 'eyes'
+              });
+            }
+            
+            core.setOutput('should_run', shouldRun);
+            core.setOutput('pr_number', prNumber);
+
+  pr-review:
+    needs: check-comment
+    if: needs.check-comment.outputs.should_run == 'true'
+    uses: augment-solutions/.github/.github/workflows/org-pr-review.yml@main
+    with:
+      pull_number: ${{ fromJSON(needs.check-comment.outputs.pr_number) }}
+      
+      # CUSTOMIZE: Add project-specific review guidelines
+      # custom_guidelines: |
+      #   - Check for proper error handling
+      #   - Ensure all public APIs have documentation
+      #   - Verify backward compatibility
+      
+      # CUSTOMIZE: Node.js configuration (if needed)
+      # node_version: '22'
+      # package_manager: 'npm'  # Options: npm, yarn, pnpm
+      
+      # CUSTOMIZE: External repository for reference (if needed)
+      # external_repo: 'org/reference-repo'
+      # external_repo_path: 'external-repos/reference'
+    
+    secrets:
+      augment_session_auth: ${{ secrets.AUGMENT_SESSION_AUTH }}
+      gh_token: ${{ secrets.GITHUB_TOKEN }}
+
+  post-review-comment:
+    needs: [check-comment, pr-review]
+    if: always() && needs.check-comment.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    
+    steps:
+      - name: Add completion reaction (rocket/confused)
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const reaction = '${{ needs.pr-review.result }}' === 'success' ? 'rocket' : 'confused';
+            
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: reaction
+            });
+

@@ -16,14 +16,17 @@ on:
     types: [created]
 
 jobs:
-  trigger-test-generation:
+  check-trigger:
     # Only run on PR comments (not issue comments)
     if: github.event.issue.pull_request != null
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: write
-      issues: write
+      pull-requests: write  # For adding reactions
+    outputs:
+      triggered: ${{ steps.check-command.outputs.triggered }}
+      pr_number: ${{ steps.pr-info.outputs.pr_number }}
+      head_ref: ${{ steps.pr-info.outputs.head_ref }}
+      head_sha: ${{ steps.pr-info.outputs.head_sha }}
 
     steps:
       - name: Check for trigger command
@@ -61,23 +64,59 @@ jobs:
               repo: context.repo.repo,
               pull_number: context.issue.number
             });
+            core.setOutput('pr_number', context.issue.number);
             core.setOutput('head_ref', pr.data.head.ref);
             core.setOutput('head_sha', pr.data.head.sha);
 
-      - name: Call org-wide test generation workflow
-        if: steps.check-command.outputs.triggered == 'true'
-        uses: augment-solutions/.github/.github/workflows/org-test-generate.yml@main
+  generate-tests:
+    needs: check-trigger
+    if: needs.check-trigger.outputs.triggered == 'true'
+    uses: augment-solutions/.github/.github/workflows/org-test-generate.yml@main
+    with:
+      pr_number: ${{ fromJSON(needs.check-trigger.outputs.pr_number) }}
+      head_ref: ${{ needs.check-trigger.outputs.head_ref }}
+      head_sha: ${{ needs.check-trigger.outputs.head_sha }}
+      # Customize these inputs as needed:
+      # test_framework: 'pytest'  # Options: pytest, jest, go, etc.
+      # test_directory: 'tests/'  # Where to place generated tests
+      # custom_instructions: |
+      #   Additional instructions for test generation
+      # model: 'sonnet4.5'  # AI model to use
+    secrets:
+      augment_session_auth: ${{ secrets.AUGMENT_SESSION_AUTH }}
+      gh_token: ${{ secrets.GITHUB_TOKEN }}
+
+  post-generation:
+    needs: [check-trigger, generate-tests]
+    if: always() && needs.check-trigger.outputs.triggered == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Add completion reaction
+        if: needs.generate-tests.result == 'success'
+        uses: actions/github-script@v7
         with:
-          pr_number: ${{ github.event.issue.number }}
-          head_ref: ${{ steps.pr-info.outputs.head_ref }}
-          head_sha: ${{ steps.pr-info.outputs.head_sha }}
-          # Customize these inputs as needed:
-          # test_framework: 'pytest'  # Options: pytest, jest, go, etc.
-          # test_directory: 'tests/'  # Where to place generated tests
-          # custom_instructions: |
-          #   Additional instructions for test generation
-          # model: 'sonnet4.5'  # AI model to use
-        secrets:
-          augment_session_auth: ${{ secrets.AUGMENT_SESSION_AUTH }}
-          gh_token: ${{ secrets.GH_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket'
+            });
+
+      - name: Add failure reaction
+        if: needs.generate-tests.result == 'failure'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'confused'
+            });
 

@@ -29,6 +29,8 @@ jobs:
   check-trigger:
     name: Check Trigger Conditions
     runs-on: ubuntu-latest
+    permissions:
+      issues: write  # For adding reactions
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
       issue_number: ${{ steps.check.outputs.issue_number }}
@@ -37,6 +39,42 @@ jobs:
       issue_comments: ${{ steps.check.outputs.issue_comments }}
 
     steps:
+      - name: Ensure required labels exist
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const labels = [
+              { name: 'auggieImplementPlan', color: '1D76DB', description: 'Trigger Auggie implementation plan generation' },
+              { name: 'auggie-in-progress', color: 'FBCA04', description: 'Auggie is currently working on this issue' },
+              { name: 'plan-ready', color: '0E8A16', description: 'Implementation plan has been generated' }
+            ];
+
+            for (const label of labels) {
+              try {
+                await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name
+                });
+                console.log(`Label "${label.name}" already exists`);
+              } catch (error) {
+                if (error.status === 404) {
+                  console.log(`Creating label "${label.name}"...`);
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: label.name,
+                    color: label.color,
+                    description: label.description
+                  });
+                  console.log(`Label "${label.name}" created`);
+                } else {
+                  throw error;
+                }
+              }
+            }
+
       - name: Check if workflow should run
         id: check
         uses: actions/github-script@v7
@@ -103,6 +141,8 @@ jobs:
     needs: check-trigger
     if: needs.check-trigger.outputs.should_run == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      issues: write  # For adding labels
 
     steps:
       - name: Add auggie-in-progress label
@@ -156,6 +196,8 @@ jobs:
     needs: [check-trigger, generate-plan]
     if: always() && needs.check-trigger.outputs.should_run == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      issues: write  # For managing labels and reactions
 
     steps:
       - name: Remove in-progress label and add completion label
