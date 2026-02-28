@@ -23,9 +23,45 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      issues: write  # For creating labels
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
     steps:
+      - name: Ensure required labels exist
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const labels = [
+              { name: 'auggieImplementDirect', color: 'D93F0B', description: 'Trigger Auggie direct implementation' },
+              { name: 'auggie-in-progress', color: 'FBCA04', description: 'Auggie is currently working on this issue' }
+            ];
+
+            for (const label of labels) {
+              try {
+                await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name
+                });
+                console.log(`Label "${label.name}" already exists`);
+              } catch (error) {
+                if (error.status === 404) {
+                  console.log(`Creating label "${label.name}"...`);
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: label.name,
+                    color: label.color,
+                    description: label.description
+                  });
+                  console.log(`Label "${label.name}" created`);
+                } else {
+                  throw error;
+                }
+              }
+            }
+
       - name: Check if workflow should run
         id: check
         run: |
