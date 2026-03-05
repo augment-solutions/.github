@@ -15,6 +15,10 @@ on:
   issue_comment:
     types: [created]
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   check-trigger:
     # Only run on PR comments (not issue comments)
@@ -31,12 +35,13 @@ jobs:
     steps:
       - name: Check for trigger command
         id: check-command
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          COMMENT="${{ github.event.comment.body }}"
-          if echo "$COMMENT" | grep -q "/auggieTestGenerate"; then
-            echo "triggered=true" >> $GITHUB_OUTPUT
+          if echo "$COMMENT_BODY" | grep -q "/auggieTestGenerate"; then
+            echo "triggered=true" >> "$GITHUB_OUTPUT"
           else
-            echo "triggered=false" >> $GITHUB_OUTPUT
+            echo "triggered=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Add rocket reaction to trigger comment
