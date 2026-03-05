@@ -73,24 +73,38 @@ jobs:
 
     steps:
       - name: Post workflow summary
+        env:
+          WORKFLOW_RUN_ID: ${{ inputs.workflow_run_id }}
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+          FAILED_SERVICES: ${{ inputs.failed_services || 'Not specified' }}
+          TRIAGE_RESULT: ${{ needs.triage.result }}
+          FIX_BRANCH: ${{ needs.triage.outputs.fix_branch }}
+          FAILURE_TYPE: ${{ needs.triage.outputs.failure_type }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          echo "## 🔍 Build Triage Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Workflow Run ID:** ${{ inputs.workflow_run_id }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Source Branch:** ${{ inputs.source_branch }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Failed Services:** ${{ inputs.failed_services || 'Not specified' }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [ "${{ needs.triage.result }}" == "success" ]; then
-            echo "✅ **Status:** Triage completed successfully" >> $GITHUB_STEP_SUMMARY
-            echo "**Fix Branch:** \`${{ needs.triage.outputs.fix_branch }}\`" >> $GITHUB_STEP_SUMMARY
-            echo "**Failure Type:** ${{ needs.triage.outputs.failure_type }}" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "🔗 [View this workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## 🔍 Build Triage Summary"
+            echo ""
+            echo "**Workflow Run ID:** ${WORKFLOW_RUN_ID}"
+            echo "**Source Branch:** ${SOURCE_BRANCH}"
+            echo "**Failed Services:** ${FAILED_SERVICES}"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$TRIAGE_RESULT" == "success" ]; then
+            {
+              echo "✅ **Status:** Triage completed successfully"
+              echo "**Fix Branch:** \`${FIX_BRANCH}\`"
+              echo "**Failure Type:** ${FAILURE_TYPE}"
+              echo ""
+              echo "🔗 [View this workflow run](${RUN_URL})"
+            } >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "❌ **Status:** Triage failed" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Please check the workflow logs for details." >> $GITHUB_STEP_SUMMARY
+            {
+              echo "❌ **Status:** Triage failed"
+              echo ""
+              echo "Please check the workflow logs for details."
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
       # CUSTOMIZATION: Slack Notifications

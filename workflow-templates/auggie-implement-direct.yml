@@ -18,71 +18,43 @@ on:
   issue_comment:
     types: [created]
 
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
 jobs:
   check-trigger:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      issues: write  # For creating labels
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
     steps:
-      - name: Ensure required labels exist
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const labels = [
-              { name: 'auggieImplementDirect', color: 'D93F0B', description: 'Trigger Auggie direct implementation' },
-              { name: 'auggie-in-progress', color: 'FBCA04', description: 'Auggie is currently working on this issue' }
-            ];
-
-            for (const label of labels) {
-              try {
-                await github.rest.issues.getLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  name: label.name
-                });
-                console.log(`Label "${label.name}" already exists`);
-              } catch (error) {
-                if (error.status === 404) {
-                  console.log(`Creating label "${label.name}"...`);
-                  await github.rest.issues.createLabel({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    name: label.name,
-                    color: label.color,
-                    description: label.description
-                  });
-                  console.log(`Label "${label.name}" created`);
-                } else {
-                  throw error;
-                }
-              }
-            }
-
       - name: Check if workflow should run
         id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          LABEL_NAME: ${{ github.event.label.name }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
           SHOULD_RUN="false"
-          
+
           # Check if triggered by label
-          if [ "${{ github.event_name }}" = "issues" ]; then
-            if [ "${{ github.event.label.name }}" = "auggieImplementDirect" ]; then
+          if [ "$EVENT_NAME" = "issues" ]; then
+            if [ "$LABEL_NAME" = "auggieImplementDirect" ]; then
               SHOULD_RUN="true"
             fi
           fi
-          
+
           # Check if triggered by slash command
-          if [ "${{ github.event_name }}" = "issue_comment" ]; then
-            COMMENT_BODY="${{ github.event.comment.body }}"
+          if [ "$EVENT_NAME" = "issue_comment" ]; then
             if echo "$COMMENT_BODY" | grep -q "^/auggieImplementDirect"; then
               SHOULD_RUN="true"
             fi
           fi
-          
-          echo "should_run=$SHOULD_RUN" >> $GITHUB_OUTPUT
+
+          echo "should_run=$SHOULD_RUN" >> "$GITHUB_OUTPUT"
 
   prepare-implementation:
     needs: check-trigger
